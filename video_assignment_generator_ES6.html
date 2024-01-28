@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="utf-8">
+<meta name="author" content="Wing-Ho Ko">
+<meta name="description" content="Random Video Assignment Generator">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+
+<title>Random Video Assignment Generator</title>
+
+<script>
+"use strict";
+
+/**
+ * @license MIT
+ *
+ * Copyright (c) 2024 winghoko
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the 
+ * next paragraph) shall be included in all copies or substantial portions
+ * of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
+ */
+
+/**
+ * @overview Implement an algorithm to randomly assign diver operated videos
+ *   (DOV) from the Vatu-i-Ra Seascape to students for quantitative analysis 
+ *   in the classrooms. The algorithm aims to balance the number of videos 
+ *   taken from each site (especially to balance the number from fished (F) 
+ *   sites and tabu (T) [ = non-fished] sites), as well as the difficulty 
+ *   of analyzing the videos in the subsequent task.
+ *   
+ *   The algorithm first pick out the number of videos each student is 
+ *   assigned from each level of difficulty, then select these at random 
+ *   while trying to balance the sites they come from. Then, the selected 
+ *   videos are randomly assigned to the students in a "column-first" 
+ *   manner (i.e, all students are assigned a first video before a second
+ *   video is assigned), subjected to the condition that no videos are 
+ *   repeatedly assigned to the same students.
+ *
+ *   In addition, the javascript also provides support for presenting the
+ *   assignment result in html table, as well as saving the assignment in
+ *   both html and csv formats.
+ *
+ *   This html file is intended to be stand-alone, with no online access 
+ *   required. This script should works on any browser that implements 
+ *   core features of the ECMAScript 2015 (a.k.a. ES6). For older browsers,
+ *   down transpiling should be an option.
+*/
+
+// core data used in the algorithm as global variables
+// some generated from raw excel via python
+const min_repeat = 3;
+const difficulties = ["E", "M", "H"]; 
+const difficulty_maxes = [17, 18, 13];
+const num_difficulties = 3;
+const sites = ["VF1", "VF2", "VF3", "VF4", "VT1", "VT2", "VT3", "VT4"];
+const num_sites = 8;
+const num_F_sites = 4; // F = fished, as opposed to T = tabu (= non-fished)
+const video_pool = [
+    [["E_VF1_1", "E_VF1_2", "E_VF1_3"], ["E_VF2_1", "E_VF2_2"], ["E_VF3_1", "E_VF3_2"], 
+        ["E_VF4_1", "E_VF4_2"], ["E_VT1_1", "E_VT1_2", "E_VT1_3", "E_VT1_4"], 
+        ["E_VT2_1", "E_VT2_2", "E_VT2_3", "E_VT2_4"], [], []], 
+    [["M_VF1_1", "M_VF1_2", "M_VF1_3"], ["M_VF2_1", "M_VF2_2", "M_VF2_3"], 
+        ["M_VF3_1", "M_VF3_2", "M_VF3_3"], ["M_VF4_1", "M_VF4_2"], [], ["M_VT2_1"], 
+        ["M_VT3_1", "M_VT3_2", "M_VT3_3"], ["M_VT4_1", "M_VT4_2", "M_VT4_3"]], 
+    [[], ["H_VF2_1"], ["H_VF3_1"], ["H_VF4_1", "H_VF4_2"], ["H_VT1_1", "H_VT1_2"], 
+        ["H_VT2_1"], ["H_VT3_1", "H_VT3_2", "H_VT3_3"], ["H_VT4_1", "H_VT4_2", "H_VT4_3"]]
+]; // outer index: difficulty; middle index: site; inner index: available videos
+const video_lookup = {"H_VT4_1": "Video 1", "M_VT3_1": "Video 2", "M_VF1_1": "Video 3",
+    "E_VT1_1": "Video 4", "M_VF1_2": "Video 5", "H_VT3_1": "Video 6", "M_VT3_2": "Video 7",
+    "H_VF4_1": "Video 8", "E_VF2_1": "Video 9", "M_VF1_3": "Video 10", "E_VF1_1": "Video 11",
+    "M_VT4_1": "Video 12", "E_VT2_1": "Video 13", "M_VF3_1": "Video 14", "E_VF1_2": "Video 15",
+    "H_VF2_1": "Video 16", "H_VT2_1": "Video 17", "E_VF3_1": "Video 18", "M_VT4_2": "Video 19",
+    "E_VT1_2": "Video 20", "E_VT1_3": "Video 21", "M_VF4_1": "Video 22", "E_VF4_1": "Video 23",
+    "M_VF2_1": "Video 24", "E_VT2_2": "Video 25", "E_VT2_3": "Video 26", "E_VF3_2": "Video 27",
+    "H_VT4_2": "Video 28", "H_VT3_2": "Video 29", "H_VT1_1": "Video 30", "M_VF3_2": "Video 31",
+    "H_VT3_3": "Video 32", "H_VT4_3": "Video 33", "M_VF4_2": "Video 34", "E_VF1_3": "Video 35",
+    "E_VF2_2": "Video 36", "E_VT2_4": "Video 37", "M_VT4_3": "Video 38", "M_VF2_2": "Video 39",
+    "E_VF4_2": "Video 40", "H_VT1_2": "Video 41", "H_VF3_1": "Video 42", "M_VF2_3": "Video 43",
+    "H_VF4_2": "Video 44", "M_VF3_3": "Video 45", "M_VT2_1": "Video 46", "M_VT3_3": "Video 47",
+    "E_VT1_4": "Video 48"};
+const link_lookup = {"H_VT4_1": "https://youtu.be/H9ElaidY3Uc", 
+    "M_VT3_1": "https://youtu.be/llotwsWsIfw", "M_VF1_1": "https://youtu.be/mIYCnwFVCrE", 
+    "E_VT1_1": "https://youtu.be/txVsnQFLZtI", "M_VF1_2": "https://youtu.be/n6HIPTJtFUo", 
+    "H_VT3_1": "https://youtu.be/zju8bMKQI38", "M_VT3_2": "https://youtu.be/Y2_3KKqRVAI", 
+    "H_VF4_1": "https://youtu.be/ivSoB_w-C_c", "E_VF2_1": "https://youtu.be/Fj_Ojaw9auU", 
+    "M_VF1_3": "https://youtu.be/OGwYAFrjgsA", "E_VF1_1": "https://youtu.be/RWgjxHi6DOY", 
+    "M_VT4_1": "https://youtu.be/z81G3SquUrw", "E_VT2_1": "https://youtu.be/DrevNRZNv-s", 
+    "M_VF3_1": "https://youtu.be/D0LCcDpaRTA", "E_VF1_2": "https://youtu.be/ejanBjfw_w4", 
+    "H_VF2_1": "https://youtu.be/9Ij5VBMUT0Q", "H_VT2_1": "https://youtu.be/12Gb3_xGHAw", 
+    "E_VF3_1": "https://youtu.be/8R_lk6RX7kY", "M_VT4_2": "https://youtu.be/KkcUUiSzrdE", 
+    "E_VT1_2": "https://youtu.be/V40FJxqMx-c", "E_VT1_3": "https://youtu.be/lOEueBRZ_h0", 
+    "M_VF4_1": "https://youtu.be/6WOwBg5fkl8", "E_VF4_1": "https://youtu.be/QbC6aSmUCT8", 
+    "M_VF2_1": "https://youtu.be/OpWPS0PvVXQ", "E_VT2_2": "https://youtu.be/I-67ycA_boM", 
+    "E_VT2_3": "https://youtu.be/B311yT72H00", "E_VF3_2": "https://youtu.be/33-NBDo94MM", 
+    "H_VT4_2": "https://youtu.be/1u6zSLJ69Ks", "H_VT3_2": "https://youtu.be/OYLLFqMlL0o", 
+    "H_VT1_1": "https://youtu.be/RS-r8bzPqMo", "M_VF3_2": "https://youtu.be/sfwiJcVBOFo", 
+    "H_VT3_3": "https://youtu.be/vqWxey5NBvk", "H_VT4_3": "https://youtu.be/BN4LnVbshBM", 
+    "M_VF4_2": "https://youtu.be/avTLqeWMNpI", "E_VF1_3": "https://youtu.be/2x2nv1QtSx0", 
+    "E_VF2_2": "https://youtu.be/hJ3dSgvKxbo", "E_VT2_4": "https://youtu.be/ww2iMcZzsGI", 
+    "M_VT4_3": "https://youtu.be/cruozcBQcbQ", "M_VF2_2": "https://youtu.be/FhTmHRgsLUs", 
+    "E_VF4_2": "https://youtu.be/U65EuPIZxtQ", "H_VT1_2": "https://youtu.be/vS7Occqs74M", 
+    "H_VF3_1": "https://youtu.be/y3U2ybbJ2JE", "M_VF2_3": "https://youtu.be/PpuvAtOitjs", 
+    "H_VF4_2": "https://youtu.be/tIqXVp4kQNA", "M_VF3_3": "https://youtu.be/8ty6-Oz03Qs", 
+    "M_VT2_1": "https://youtu.be/fpfP7IF6uVg", "M_VT3_3": "https://youtu.be/7HjxLgj9b_k", 
+    "E_VT1_4": "https://youtu.be/_y6yd-gSuYE"};
+
+//// FUNCTIONS IMPLEMENTING THE VIDEO ASSIGNMENT ALGORITHM.
+
+/**
+ * Pick an integer between a (inclusive) and b (exclusive) at random,
+ * equivalent to Python function random.randrange(a, b)
+ *
+ * @param {number} a - The lower bound (inclusive) of random value. Should be 
+ *   an integer.
+ * @param {number} b - The upper bound (exclusive) of random value. Should be 
+ *   an integer.
+ * 
+ * @return {number} A random integer between a and b 
+ */
+function rand_int(a, b) {
+    return a + Math.floor( Math.random() * (b - a));
+}
+
+// ref for random shuffle: https://javascript.info/task/shuffle
+
+/**
+ * In-place shuffling of an array using the Fisher-Yates algorithm 
+ * (a.k.a. Kunth algorithm). Generalizes the Python function 
+ * random.shuffle(array).
+ * 
+ * @param {Array} array - The array to be shuffled.
+ * @param {number} start - The start index (inclusive) of the slice of array 
+ *   to be shuffled.
+ * @param {number} end - The end index (exclusive) of the slice of array to
+ *   be shuffled.
+ *
+ * @return {void} No explicit returns.
+ */
+function shuffle(array, start, end) {
+    if (start===undefined) start = 0;
+    if (end===undefined) end = array.length;
+    for (let i = end - 1; i > start; i--) {
+        let j = start + Math.floor(Math.random() * (i - start + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+}
+
+/**
+ * Convenience function to generate consecutive array starting 0, 
+ * equivalent to Python function list(range(num)).
+ *
+ * @param {number} num - The length of the resulting array. Should be a
+ *   positive integer.
+ *
+ * @return {Array<number>} Array of numbers going from 0 to (num - 1) in 
+ *   steps of 1.
+ */
+function range(num){
+    let out_array = new Array(num);
+    for(let i=0; i<num; i++) out_array[i] = i;
+    return out_array;
+}
+
+/**
+ * Copy the pool of video specified in the global variable `video_pool`
+ * with the innermost arrays shuffled.
+ * 
+ * Takes no parameters.
+ *
+ * @return {Array<Array<Array<string>>>} shuffled video pool.
+ */
+function copy_video_pool(){
+    
+    let video_pool_mut = new Array();
+    
+    for (let sub_pool of video_pool) {
+        let sub_pool_mut = new Array();
+        for (let sub_list of sub_pool){
+            let sub_list_mut = Array.from(sub_list);
+            shuffle(sub_list_mut);
+            sub_pool_mut.push(sub_list_mut);
+        }
+        video_pool_mut.push(sub_pool_mut);
+    }
+    
+    return video_pool_mut;
+}
+
+/**
+ * Given the number of video assigned to students, determine the number of
+ * videos in the easy/medium/hard categories that each student should receive.
+ *
+ * Note #1: assumed 3 categories of difficulty.
+ * Note #2: the number assigned per category should differ at most by 1, and
+ * the categor(y/ies) that get an extra video is chosen at random.
+ *
+ * @param {number} num_vid_per - Number of video assigned per student. Should
+ *   be a positive integer >= 3.
+ *
+ * @return {Array<number>} Array of video assignment for each category, in
+ *   the order of (easy, medium, hard)
+ */
+function assign_difficulty(num_vid_per){
+    
+    let d = Math.floor(num_vid_per / num_difficulties);
+    let r = num_vid_per % num_difficulties;
+    
+    let out_array = new Array(num_difficulties);
+    out_array.fill(d);
+    
+    let tmp_array = range(num_difficulties);
+    shuffle(tmp_array);
+    
+    for (let idx of tmp_array.slice(0, r)) out_array[idx] += 1;
+    
+    return out_array;
+}
+
+/**
+ * Generate an array of desired usage count for each distinct video.
+ *
+ * @param {number} num_stud - Number of students to be assigned videos. Should
+ *   be a positive integer >= min_repeat.
+ * @param {number} num_vid_per - Number of video assigned per student. Should
+ *   be a positive integer >= 3.
+ * @param {number} max_vid - The Maximum number of distinct videos.
+ *
+ * @return {Array<number>} number of assignment for the first, second, etc. 
+ *   video selected.
+ */
+function gen_vid_counts(num_stud, num_vid_per, max_vid){
+    
+    let total = num_stud * num_vid_per;
+    let n_vid, n_rep, r;
+    
+    if (total > max_vid * min_repeat){
+        n_vid = max_vid;
+        n_rep = Math.floor(total/n_vid);
+        r = total % n_vid;
+    } else {
+        n_rep = min_repeat;
+        n_vid = Math.floor(total/n_rep);
+        r = total % min_repeat;
+    }
+    
+    let out_array = new Array(n_vid);
+    out_array.fill(n_rep);
+    
+    let tmp_array = range(n_vid);
+    shuffle(tmp_array);
+    
+    for(let i=0; i<r; i++){
+        let idx = tmp_array[i % n_vid];
+        out_array[idx] += 1;
+    }
+    
+    return out_array;
+}
+
+/**
+ * Rank the array of sites with decreasing preference for which the next video
+ * will be drawn from.
+ * 
+ * @param {Array<number>} used_array - Array of the number of videos that have
+ *   been drawn from a given site. The site that correponds to an index is 
+ *   inferred from the global `sites` array.
+ *
+ * @return {Array<number>} Array of site index, in decreasing order of 
+ *   preference for which the next video is drawn.
+*/
+function rank_pref(used_array){
+    
+    // T = tabu (= non-fished), F = fished
+    let total_T = used_array.slice(num_F_sites).reduce((x,y) => x + y, 0);
+    let total_F = used_array.slice(0, num_F_sites).reduce((x,y) => x + y, 0);
+    
+    // if total_T = total_F there is no distinction between the two groups
+    // otherwise one group is preferred to the other
+    let idx = (total_F===total_T) ? num_sites : num_F_sites;
+    let head = range(num_sites);
+    let tail = head.splice(idx);
+    
+    // randomize tie breaking
+    shuffle(head);
+    shuffle(tail);
+    
+    // sort by decreasing number of use
+    head.sort((x,y) => used_array[x] - used_array[y]);
+    tail.sort((x,y) => used_array[x] - used_array[y]);
+    
+    // always try to balance the total videos from T and F sites first
+    if (total_F > total_T){
+        return tail.concat(head);
+    } else if (total_F < total_T) {
+        return head.concat(tail);
+    } else {
+        return head;
+    }
+}
+
+/**
+ * Draw the next video from a video (sub)pool. All videos in the subpool
+ * should have the same difficulty.
+ *
+ * @param {Array<Array<string>>} ran_pool - A (sub)pool of videos that have
+ *   NOT YET been drawn. The innermost arrays are assumed to be shuffled. 
+ *   [SIDE EFFECT] This variable is modified in-place by the function.
+ * @param {Array<number>} used_array - An array indicating the number of 
+ *   videos already drawn from a given site. The site that correponds to 
+ *   an index is inferred from the global `sites` array. [SIDE EFFECT] 
+ *   This array is modified in-place by the function.
+ * @param {boolean} show_site - whether or not the index of site from which 
+ *   the drawn video is from is also returned
+ *
+ * @return {Object|string} If show_site is true, an object with attributes
+ *   `vid` (value = the next video drawn) and `site_idx` (value = index of
+ *   the site from which the video is drawn). If show_site is false, the
+ *   video drawn.
+ */ 
+function choose_next_vid(ran_pool, used_array, show_site) {
+    
+    let pref_array = rank_pref(used_array);
+    let site_idx = -1;
+    let out_vid = "";
+    
+    for (let idx of pref_array){
+        if (ran_pool[idx].length > 0){
+            site_idx = idx;
+            out_vid = ran_pool[idx].pop();
+            used_array[idx] += 1;
+            break;
+        }
+    }
+    
+    if (show_site) {
+        return {vid: out_vid, site_idx: site_idx};
+    } else {
+        return out_vid;
+    }
+}
+
+/**
+ * Generate an ordered list (array) of videos to be assigned. The videos are
+ * to be drawn from a (sub)pool. All videos in the subpool should have the 
+ * same difficulty.
+ * 
+ * @param {Array<Array<string>>} ran_pool - A (sub)pool of videos that have
+ *   NOT YET been drawn. The innermost arrays are assumed to be shuffled.
+ *   [SIDE EFFECT] This variable is modified in-place by this function.
+ * @param {Array<number>} used_array - An array indicating the number of
+ *   videos already drawn from a given site. The site that correponds to
+ *   an index is inferred from the global `sites` array. [SIDE EFFECT]
+ *   This array is modified in-place by this function.
+ * @param {number} num_vid - The total number of videos to be assigned.
+ * @param {boolean} sort - Whether the videos are sorted so that the F-sites
+ *   show up before the T-sites.
+ *
+ * @return {Array} Array of the videos to be assigned.
+ */
+function gen_vid_list(ran_pool, used_array, num_vid, sort){
+    
+    // F = fished, T = tabu (= non-fished)
+    let out_array = new Array(num_vid);
+    let F_idx = 0;
+    let T_idx = num_vid - 1;
+    
+    for(let i=0; i<num_vid; i++){
+        let {vid, site_idx} = choose_next_vid(ran_pool, used_array, true);
+        if (sort) {
+            if (site_idx < num_F_sites){
+                out_array[F_idx++] = vid;
+            } else {
+                out_array[T_idx--] = vid;
+            }
+        } else { 
+            out_array[i] = vid;
+        }
+    }
+    return out_array;
+}
+
+/**
+ * Generate the list of all videos (all difficulties included) to be assigned.
+ *
+ * @param {number} num_stud - Number of students to be assigned videos.
+ * @param {number} num_vid_per - Number of videos to be assigned to each student.
+ * @param {boolean} sort - Whether the videos are sorted so that the fished (F) 
+ *   sites show up before the tabu (T) [= non-fished] sites.
+ * @param {boolean} details - Whether to return additional information.
+ *
+ * @return {Object} If details is true, an object consisting of 4 attributes:
+     - names: the label of the videos to be asisgned.
+     - counts: the number of times each videos (identified in names) are to 
+       be assigned.
+     - difficulties: the count of videos drawn from each difficulty category.
+     - site_uses: the count of videos drawn from each site.
+     If details is false, the object will only have the `names` and the 
+     `counts` attributes.
+ */
+function gen_all_vid_list(num_stud, num_vid_per, sort, details){
+    
+    // initialize video pool and used array
+    let video_pool_mut = copy_video_pool();
+    let used_array = new Array(num_sites);
+    used_array.fill(0);
+    
+    // determine number of video per student for each difficulty category
+    let difty_per_array = assign_difficulty(num_vid_per);
+    
+    // initialize order to run through difficulty categories
+    let difty_order = range(num_difficulties);
+    shuffle(difty_order);
+    difty_order.sort((x,y) => difty_per_array[y] - difty_per_array[x]);
+    
+    let vid_count_list = new Array();
+    let vid_list = new Array();
+    
+    // for each difficulty, assign videos and the respective counts
+    for (let idx of difty_order) {
+        let tmp_count_list = gen_vid_counts(
+            num_stud, difty_per_array[idx], difficulty_maxes[idx]
+        );
+        let tmp_list = gen_vid_list(
+            video_pool_mut[idx], used_array, tmp_count_list.length, sort
+        );
+        
+        vid_count_list.push(tmp_count_list);
+        vid_list.push(tmp_list);
+    }
+    
+    if (details){
+        return { names: vid_list.flat() , counts: vid_count_list.flat(), 
+            difficulties: difty_per_array, site_uses: used_array};
+    } else {
+        return { names: vid_list.flat() , counts: vid_count_list.flat()};
+    }
+}
+
+/**
+ * Fill one column of video assignment (i.e., fill one video for each student).
+ *
+ * @param {Array<Array<string>>} assign_mat - Matrix of video assignment 
+ *   (row <-> student, column <-> assignment #). [SIDE EFFECT] This array is
+ *   modified in-place by this function.
+ * @param {Array<number>} fill_order - The order to fill the videos.
+ * @param {Array<string>} vid_list - The list of videos to be assigned.
+ * @param {Array<number>} vid_count_list - The reamining counts to be assigned
+ *   for each video in `vid_list`. [SIDE EFFECT] This array is modified
+ *   in-place by this function.
+ *
+ * @return {void} No explicit return.
+ */
+function fill_one_assignment(assign_mat, fill_order, vid_list, vid_count_list){
+    
+    for (let idx of fill_order) {
+        
+        let last = vid_count_list.length - 1;
+        assign_mat[idx].push(vid_list[last]);
+        
+        if (vid_count_list[last] > 1){
+            vid_count_list[last] -= 1;
+        } else { 
+            vid_count_list.pop();
+        }
+    }
+}
+
+/**
+ * Shuffle the list of order for which assignments are filled.
+ *
+ * NOTE: double shuffling is used so that if a video is assigned across two
+ * assignment #, that video will never be assigned multiple times to the 
+ * same student.
+ *
+ * @param {Array<number>} fill_order - Order (in student #) in filling the
+ *   video assignment to students. For example, if the first entry is 20,
+ *   then the first video is assigned to student #20. [SIDE EFFECT] This
+ *   array is modified in-place by this function.
+ * @param {number} head_num - The number of entry to skip in the 2nd shuffle.
+ * @param {number} tail_num - The number of entry to skip in the 1st shuffle.
+ * 
+ * @return {void} No explicit return.
+ */
+function shuffle_fill_order(fill_order, head_num, tail_num){
+    
+    if (head_num===undefined || tail_num===undefined){
+        shuffle(fill_order);
+    } else {
+        // first shuffle keeps tail unchanged
+        shuffle(fill_order, 0, fill_order.length - tail_num);
+        // second shuffle keeps head unchanged
+        shuffle(fill_order, head_num, fill_order.length);
+    }
+}
+
+/** 
+ * Fill the video assignments for all students, given the list of videos
+ * to be used and the counts of each to be used (number of videos assigned
+ * per student is inferred implicitly).
+ * 
+ * @param {number} num_stud - Number of students to be assigned videos
+ * @param {Array<string>} vid_list - The list of videos to be assigned.
+ * @param {Array<number>} vid_count_list - The number of times each Video
+ *   will be assigned to the whole class.
+ * 
+ * @return {Array<Array<string>>} The matrix of video assignment, where 
+ *   row <-> student and column <-> assignment #.
+ */
+function fill_assignments(num_stud, vid_list, vid_count_list){
+    
+    // initialize output and fill order
+    let fill_order = range(num_stud);
+    let assign_mat = new Array(num_stud);
+    for (let i=0; i<num_stud; i++) {
+        assign_mat[i] = new Array();
+    } // NOTE: .fill(new Array()) DOES NOT WORK!
+    
+    // mutable copy
+    let vid_count_mut = Array.from(vid_count_list);
+    let last_idx = vid_count_mut.length - 1;
+    
+    while (last_idx > -1){
+        
+        // properly shuffle fill_order
+        if (vid_count_mut[last_idx] === vid_count_list[last_idx]){
+            shuffle_fill_order(fill_order);
+        } else {
+            let head_val = vid_count_mut[last_idx];
+            let tail_val = vid_count_list[last_idx] - head_val;
+            shuffle_fill_order(fill_order, head_val, tail_val);
+        }
+        
+        fill_one_assignment(assign_mat, fill_order, vid_list, vid_count_mut);
+        last_idx = vid_count_mut.length - 1;
+    }
+    
+    return assign_mat;
+}
+
+/** 
+ * Shuffle the order of videos assigned to each student, subjected to the 
+ * condition that the first video is always in the "easy" category.
+ *
+ * @param {Array<Array<string>>} assign_mat - Matrix of video assignment 
+ *   (row <-> student, column <-> assignment #). [SIDE EFFECT] This array 
+ *   is modified in-place by this function.
+ * @param {number} num_easy - Number of easy videos assigned to each student.
+ * @param {string} easy_code - The substring (at the beginning) used to 
+ *   identify a video as easy.
+ *
+ * @return {void} no explicit return.
+ */
+function shuffle_assign_order(assign_mat, num_easy, easy_code){
+    
+    let row_range = range(assign_mat[0].length)
+    
+    for (let row of assign_mat){
+        
+        let rand = rand_int(0, num_easy);
+        let idx = row_range.filter(x => row[x].startsWith(easy_code))[rand];
+        [ row[0], row[idx] ] = [ row[idx], row[0] ];
+        
+        shuffle(row, 1, row.length);
+    }
+    
+}
+
+//// FUNCTIONS RELATING TO HTML AND I/O INTERFACES.
+
+/** 
+ * Helper function to remove child nodes having particular tag name
+ * @param {Element} root - An HTML element under which the tag is searched.
+ * @param {string} tagName - The name of the tag, with defensive uppercasing.
+ * @param {boolean} recurse - Whether to search beyond immediate children.
+ * @return {void} No explicit return. [SIDE EFFECT] Deletion of child nodes.
+ */
+function removeChildByType(root, tagName, recurse) {
+    
+    tagName = tagName.toUpperCase(); // defensive upper-casing
+    for (let elem of root.children) {
+        if (elem.tagName.toUpperCase() === tagName) { // defensive upper-casing
+            elem.remove();
+        } else if (recurse) {
+            removeChildByType(elem, tagName, recurse);
+        }
+    }
+    
+}
+
+/**
+ * Helper function for generating csv texts from array of array
+ * @param {Array<Array<string>>} - matrix of string to be converted.
+ * @return {string} Text to use for generating CSV.
+ */
+function gen_csv_texts(matrix){
+    let csvContent = "";  
+    matrix.forEach( row => {
+        let row_text = row.join(",");
+        csvContent += row_text + "\r\n";
+    });
+    return csvContent;
+}
+
+/** 
+ * Helper function for outputing content to file
+ * Ref #1: https://stackoverflow.com/questions/14964035/
+ * Ref #2: https://ambrdetroit.com/create-csv-export-client-side-javascript/
+ * @param {string} content - The actual content of the csv file, generated, 
+ *   e.g. by gen_csv_texts().
+ * @param {string} type - The MIME type of the output file.
+ * @param {string} name - The name of the resulting file.
+ */
+function output_file(content, type, name){
+    let blob = new Blob([content], { type: type });
+    let url = URL.createObjectURL(blob);
+    let link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", name);
+    link.style = "visibility: hidden;";
+    document.body.appendChild(link); // Required for FF
+    link.click();
+    document.body.removeChild(link);
+}
+
+/** 
+ * Generate internal summary table that can be exported as csv.
+ * @param {Array<Array<string>>} assign_mat - The video assignment matrix, 
+ *   generated, e.g., by fill_assignments().
+ * @param {?Object<string,string>} lookup - The lookup from video key to 
+ *   video name.
+ * @param {boolean} header - Weather to include a header row.
+ * @return {Array<Array<string>>} Matrix representing the table to be 
+ *   converted to csv.
+ */
+function gen_summary_csv_table(assign_mat, lookup, header){
+    
+    let out_table = [];
+    let num_assign = assign_mat[0].length;
+    let num_stud = assign_mat.length;
+    
+    if (header){
+        let out_row = new Array('');
+        for (let i=0; i<num_assign; i++){
+            let out_str = "Assignment #" + (i+1).toString();
+            out_row.push(out_str);
+        }
+        out_table.push(out_row);
+    }
+    
+    for (let i=0; i<num_stud; i++){
+        let out_row = new Array( "Student #" + (i+1).toString() );
+        for (let entry of assign_mat[i]){
+            let val = (lookup===undefined) ? entry : lookup[entry];
+            out_row.push(val);
+        }
+        out_table.push(out_row);
+    }
+    
+    return out_table;
+}
+
+/**
+ * Generate internal assignment table that can be exported as (expanded) csv
+ * @param {Array<Array<string>>} assign_mat - The video assignment matrix, 
+ *   generated, e.g., by fill_assignments().
+ * @param {Object<string,string>} name_lookup - The lookup from video key 
+ *   to video name.
+* @param {Object<string,string>} link_lookup - The lookup from video key 
+ *   to video link.
+ * @param {boolean} header - Weather to include a header row.
+ * @return {Array<Array<string>>} Matrix representing the table to be 
+ *   converted to csv.
+ */
+function gen_assign_csv_table(assign_mat, name_lookup, link_lookup, header){
+    
+    let out_table = [];
+    let num_assign = assign_mat[0].length;
+    let num_stud = assign_mat.length;
+    
+    if (header){
+        let out_row = ["Student Index", "Assignment Index", "Video Name", "Video Link"];
+        out_table.push(out_row);
+    }
+    
+    for (let i=0; i<num_stud; i++){
+        let stud_str = "Student #" + (i+1).toString();
+        for (let j=0; j<num_assign;j++) {
+            let assign_str = "Assignment #" + (j+1).toString();
+            let entry = assign_mat[i][j];
+            let out_row = [ stud_str, assign_str, name_lookup[entry], link_lookup[entry] ];
+            out_table.push(out_row);
+        }
+    }
+    
+    return out_table;
+}
+
+/**
+ * Build html table for video assignment from data
+ * @param {Array<Array<string>>} assign_mat - The matrix of video assignment.
+ * @param {string} table_cls - The class name of the table returned.
+ * @return {Element} The `table` HTML element presenting the video assignment.
+ */
+// assign the resulting table to class `table_cls`
+function build_html_table(assign_mat, table_cls){
+    
+    let table = document.createElement("table");
+    let tbody = document.createElement("tbody");
+    
+    // header row
+    let tr = document.createElement("tr");
+    let head_row = [''];
+    for (let i = 0; i < assign_mat[0].length; i++){
+        head_row.push( 'Assignment #' + (i+1).toString() );
+    }
+    for (let entry of head_row){
+        let th = document.createElement("th");
+        th.scope = "col";
+        th.textContent = entry;
+        tr.append('\n    ', th);
+    }
+    tr.append('\n  ');
+    tbody.append('\n  ', tr);
+    
+    // remaining rows
+    for (let i = 0; i < assign_mat.length; i++){
+        let tr = document.createElement("tr"); 
+        
+        // header cell
+        let th = document.createElement("th");
+        th.scope = "row";
+        th.textContent = "Student #" + (i+1).toString();
+        tr.append('\n    ', th);
+        
+        // data cells
+        for (let key of assign_mat[i]){
+            let td = document.createElement("td");
+            let lnk = document.createElement("a");
+            lnk.href = link_lookup[key];
+            lnk.target = "_blank";
+            lnk.textContent = video_lookup[key];
+            td.append(lnk);
+            tr.append('\n    ', td);
+        }
+        tr.append('\n  ');
+        tbody.append('\n  ', tr);
+    }
+    
+    tbody.append('\n');
+    table.append('\n', tbody, '\n');
+    if (table_cls!==undefined){
+        table.className = table_cls;
+    }
+    
+    return table;
+    
+}
+
+// the "main" script
+window.addEventListener("load", function() {
+    
+    // convenient names for key html elements
+    let form_elem = document.getElementById("user-input");
+    let N_stud_elem = document.getElementById("num-students");
+    let N_vid_elem = document.getElementById("num-videos");
+    let clear_elem = document.getElementById("clear");
+    let save_elem = document.getElementById("save-options");
+    let save_html_elem = document.getElementById("save-html");
+    let save_csv_elem = document.getElementById("save-csv");
+    let save_details_elem = document.getElementById("save-details");
+    let output_elem = document.getElementById("output");
+    
+    // hide save options elements when there's no data
+    save_elem.style.setProperty("display", "none");
+    
+    // persistent data across browser events
+    let assign_mat = undefined;
+    let table_elem = undefined;
+    
+    // Generate new assignment if asked
+    form_elem.addEventListener("submit", function(event){
+        
+        // suppressing normal http GET/POST signal
+        event.preventDefault();
+        
+        // remove existing table
+        removeChildByType(output_elem, "TABLE");
+        
+        // generate random assignment from user input
+        let num_students = parseInt(N_stud_elem.value);
+        let num_vid_per = parseInt(N_vid_elem.value);
+        let vid_data = gen_all_vid_list(num_students, num_vid_per, true, true);
+        assign_mat = fill_assignments(num_students, vid_data.names, vid_data.counts);
+        shuffle_assign_order(assign_mat, vid_data.difficulties[0], difficulties[0]);
+        
+        // show save options elements
+        save_elem.style.removeProperty("display");
+        
+        // construct html table and display
+        table_elem = build_html_table(assign_mat, "matrix");
+        output_elem.append(table_elem);
+        
+    })
+
+    // clear previous assignment
+    clear_elem.addEventListener("click", function(event){
+        
+        // hide save options elements when there's no data
+        save_elem.style.setProperty("display", "none");
+        
+        // remove existing table
+        removeChildByType(output_elem, "TABLE");
+        
+        // clear existing data
+        assign_mat = undefined;
+        table_elem = undefined;
+    })
+    
+    // output to html
+    save_html_elem.addEventListener("click", function(event){
+        if(table_elem!==undefined) {
+            let head = document.createElement("head");
+            head.innerHTML = '\n<meta charset="utf-8">\n' +
+                '<meta name="description" content="Video Assignment" />\n' +
+                '<title>Video Assignment</title>\n\n'; 
+            head.append(document.getElementById("inline-style").cloneNode(true));
+            head.append('\n');
+            let body = document.createElement("body");
+            body.innerHTML = '\n<h1>Video Assignment</h1>\n';
+            body.append(table_elem.cloneNode(true));
+            body.append('\n');
+            let html = document.createElement("html");
+            html.setAttribute("lang", "en");
+            html.append('\n', head, '\n', body, '\n');
+            let html_texts = '<!DOCTYPE html>\n';
+            html_texts += html.outerHTML;
+            output_file(html_texts, 'text/html;charset=utf-8;', 'video_assignment.html');
+        }
+    })
+    
+    // output compact table to csv
+    save_csv_elem.addEventListener("click", function(event){
+        if(assign_mat!==undefined) {
+            let out_table = gen_summary_csv_table(assign_mat, video_lookup, true);
+            let csv_texts = gen_csv_texts(out_table);
+            output_file(csv_texts, 'text/csv;charset=utf-8;', 'video_assignment.csv');
+        }
+    })
+
+    // output expanded table to csv
+    save_details_elem.addEventListener("click", function(event){
+        if(assign_mat!==undefined) {
+            let out_table = gen_assign_csv_table(assign_mat, video_lookup, link_lookup, true);
+            let csv_texts = gen_csv_texts(out_table);
+            output_file(csv_texts, 'text/csv;charset=utf-8;', 'video_assignment_details.csv');
+        }
+    })
+    
+})
+
+</script>
+
+<style id="inline-style">
+  
+  hr.vert-skip {
+    border: 0px solid transparent;
+    opacity: transparent;
+    width: 100%;
+    height: 0.3ex;
+  }
+  
+  hr.separator {
+    border: 2px solid black;
+    width: 100%;
+  }
+  
+  table.matrix {
+    margin-left: 20px;
+    border: 1px solid black;
+    border-collapse: collapse;
+  }
+  
+  table.matrix th, table.matrix td {
+    padding: 0.5vmin;
+    border: 1px solid black;
+  }
+  
+</style>
+
+</head>
+<body>
+
+<h1>Random video assignment generator</h1>
+
+<p><strong>Usage:</strong> Fill in the two number boxes then press &ldquo;Generate Assignment&rdquo;. Repeat if desired. Save options will become visible once the assignment is made.</p>
+
+<p><strong>Input restrictions:</strong> (3 &le; number of students &le; 1000) and (3 &le; number of videos per student &le; 30)</p>
+
+<p><strong>Output formats:</strong> &ldquo;Save as HTML&rdquo; essentially save the table generated on this page as a separate HTML document. &ldquo;Save as CSV&rdquo; save the table using comma-separated values but omit the YouTube links. &ldquo;Save expanded CSV&rdquo; save the information in an alternative table format so that the links can be included.</p>
+
+<!-- [ADDITIONAL INFORMATION]
+<p><strong>Note #1:</strong> the assignment generated cannot be recovered on this page once it is reloaded or when &ldquo;Clear Assignment&rdquo; is pressed. Use the save options to preserve the assignement information.</p>
+
+<p><strong>Note #2:</strong> You are recommended to run this page on Firefox or Chrome, and on a computer instead of a mobile device.</p>
+
+<p><strong>Note #3:</strong> This generator is built purely on client-side javascript and is a stanealone file. No internet connection is needed!</p>
+-->
+
+<form id="user-input" target="_self">
+  <label>Number of students:
+    <input id="num-students" name="num-students" type="number" min="3" max="1000" step="1" required>
+  </label>
+  <hr class="vert-skip">
+  <label>Number of videos assigned per student:
+    <input id="num-videos" name="num-videos" type="number" min="3" max="30" step="1" required>
+  </label>
+  <hr class="vert-skip">
+  <input id="submit" type="submit" value="Generate Assignment">
+  <input id="reset" type="reset" value="Reset User Input">
+  <input id="clear" name="clear" type="button" value="Clear Assignment">
+</form>
+<div id="save-options">
+  <hr class="vert-skip">
+  <button type="button" id="save-html" name="save-html">save as HTML</button>
+  <button type="button" id="save-csv" name="save-csv">save as CSV</button>
+  <button type="button" id="save-details" name="save-details">save expanded CSV</button>
+</div>
+
+<hr class="vert-skip">
+<hr class="separator">
+<hr class="vert-skip">
+
+<section id="output">
+</section>
+
+</body>
+</html>
